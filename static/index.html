@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProxyHub · EdgeOne 版</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--line:#262b36;--txt:#e8eaee;--mut:#9aa3b2;--acc:#4f8cff;--red:#ff5c5c;--green:#3ddc84}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+header{max-width:1080px;margin:0 auto;padding:20px 16px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+h1{font-size:22px;margin:0}h1 small{color:var(--mut);font-weight:400;font-size:13px}
+main{max-width:1080px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+input,select,textarea{width:100%;background:#0f1115;color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:6px 0;font-size:14px}
+button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:9px 14px;cursor:pointer;font-size:14px}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button.danger{background:var(--red)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.node h3{margin:0 0 6px}.mut{color:var(--mut);font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all;font-size:13px}
+.banner{background:#2a2210;border:1px solid #6b5310;color:#ffd479;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;display:none;z-index:99}
+dialog{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:14px;max-width:560px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>ProxyHub <small>EdgeOne 版 · Emby 反代面板</small></h1>
+  <div class="row" id="topBtns" style="display:none">
+    <span class="mut" id="roleTag"></span>
+    <button class="ghost" id="btnConfig">账户 / 设置</button>
+    <button class="ghost" id="btnLogout">退出</button>
+  </div>
+</header>
+<main>
+  <div id="banner" class="banner" style="display:none"></div>
+
+  <div class="card" id="loginCard">
+    <h2 style="margin:0 0 8px">登录</h2>
+    <p class="mut">管理员用 Pages 环境变量 <code>ADMIN_TOKEN</code> 登录；网页密码、子管理员、订阅者密码在管理员设置里添加。登录后才能看到节点，订阅者只能看到直达链接，看不到源站地址。</p>
+    <input id="pw" type="password" placeholder="输入密码" autocomplete="current-password">
+    <div class="row"><button id="btnLogin">登录</button><span class="mut" id="loginMsg"></span></div>
+  </div>
+
+  <div id="panel" style="display:none">
+    <div class="card">
+      <div class="row">
+        <input id="q" placeholder="搜索节点名字 / 前缀" style="flex:1;min-width:200px">
+        <button id="btnAdd">+ 添加节点</button>
+        <button class="ghost" id="btnRequests">节点申请 <span id="reqCount"></span></button>
+        <button class="ghost" id="btnApply">申请节点</button>
+      </div>
+      <p class="mut" id="statLine"></p>
+    </div>
+    <div class="grid" id="nodes"></div>
+    <div class="card" id="helpCard">
+      <h3 style="margin-top:0">怎么用</h3>
+      <p class="mut">节点直达链接是 <code>https://你的域名/前缀</code>，打开会自动跳到 <code>/前缀/web/index.html</code>。Hills 客户端：服务器地址填 <code>https://你的域名</code>、端口留空、路径填前缀，用 Emby 账号登录（不是面板密码）。不要把地址和路径都填前缀，也不要填到 <code>/web/index.html</code>。</p>
+    </div>
+  </div>
+</main>
+
+<dialog id="nodeDlg">
+  <form method="dialog" id="nodeForm">
+    <h3 id="nodeDlgTitle" style="margin-top:0">添加节点</h3>
+    <input name="prefix" placeholder="前缀路径，如 ok（字母数字 - _，1-32 位）" required>
+    <input name="name" placeholder="节点名字，如 OkMedia">
+    <input name="target" placeholder="主线路地址，如 https://link00.example.com:8443" required>
+    <textarea name="targets" rows="2" placeholder="备用线路，逗号分隔（可选，主源挂掉自动切换）"></textarea>
+    <select name="mode">
+      <option>保守</option><option selected>兼容</option><option>严格</option><option>强力</option><option>EMOS</option>
+    </select>
+    <input name="remark" placeholder="备注（可选）">
+    <input name="username" placeholder="节点账号（用于一键导入播放器，可选）">
+    <input name="password" placeholder="节点密码（用于一键导入播放器，可选）" autocomplete="off">
+    <input name="watchLimitDays" type="number" min="0" placeholder="观看下限（天），0 = 不限制">
+    <div id="emosBox" style="display:none">
+      <input name="emosId" placeholder="EMOS-PROXY-ID，如 eABCDEFGHs">
+      <input name="emosName" placeholder="EMOS-PROXY-NAME（称号）">
+    </div>
+    <div class="row"><button type="submit">保存</button><button type="button" class="ghost" onclick="document.getElementById('nodeDlg').close()">取消</button></div>
+  </form>
+</dialog>
+
+<dialog id="cfgDlg">
+  <form method="dialog" id="cfgForm">
+    <h3 style="margin-top:0">账户 / 设置（管理员）</h3>
+    <p class="mut">留空 = 不改已有值。ADMIN_TOKEN 在 Pages 环境变量里改，这里改的是网页密码。</p>
+    <input name="webPassword" type="password" placeholder="网页管理员密码（留空不改）" autocomplete="off">
+    <input name="subAdminPassword" type="password" placeholder="子管理员密码（留空不改）" autocomplete="off">
+    <input name="proxyToken" placeholder="反代 Token（留空 = 关闭；开启后节点须走 /密钥/前缀）" autocomplete="off">
+    <label class="row"><input type="checkbox" name="allowBare" style="width:auto"> 允许裸域名直连代理（/https://任意地址）</label>
+    <textarea name="subscribers" rows="3" placeholder="订阅者，每行一个：名字:密码，如 朋友:abcd1234"></textarea>
+    <div class="row">
+      <button type="submit">保存设置</button>
+      <button type="button" class="ghost" id="btnExport">导出 JSON</button>
+      <button type="button" class="ghost" id="btnImport">导入 JSON</button>
+      <button type="button" class="ghost" onclick="document.getElementById('cfgDlg').close()">关闭</button>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+  </form>
+</dialog>
+
+<dialog id="impDlg">
+  <div>
+    <h3 style="margin-top:0">一键导入播放器</h3>
+    <p class="mut" id="impNode"></p>
+    <input id="impUser" placeholder="Emby 账号">
+    <input id="impPass" placeholder="Emby 密码" autocomplete="off">
+    <div id="impLinks"></div>
+    <div class="row" style="margin-top:10px"><button class="ghost" onclick="document.getElementById('impDlg').close()">关闭</button></div>
+  </div>
+</dialog>
+
+<dialog id="reqDlg">
+  <div>
+    <h3 style="margin-top:0">节点申请</h3>
+    <div id="reqList"></div>
+    <div id="applyBox">
+      <input id="applyName" placeholder="节点名字">
+      <input id="applyUrl" placeholder="主线路地址，如 https://example.com:8096">
+      <div class="row"><button id="btnSubmitApply">提交申请</button><button class="ghost" onclick="document.getElementById('reqDlg').close()">关闭</button></div>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+<script>
+var token = localStorage.getItem('ph_token') || '';
+var role = '';
+var readonly = false;
+var nodes = [];
+var config = {};
+var editingPrefix = '';
+function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.display='block'; setTimeout(function(){t.style.display='none'},2200); }
+function headers(){ return {'Content-Type':'application/json','Authorization':'Bearer '+token}; }
+async function api(path, method, body){
+  var opt = {method: method||'GET', headers: headers()};
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  var r = await fetch(path, opt);
+  var j = null; try { j = await r.json(); } catch(e) {}
+  if (!r.ok) throw new Error((j && j.error) || ('请求失败 '+r.status));
+  return j;
+}
+function copyText(t, msg){
+  function done(){ toast(msg||'已复制'); }
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(t).then(done).catch(function(){ fallback(); }); }
+  else fallback();
+  function fallback(){
+    var ta = document.createElement('textarea'); ta.value = t; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch(e){ toast('复制失败，请手动复制'); }
+    document.body.removeChild(ta);
+  }
+}
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function directLink(n){ return location.origin + '/' + (config.proxyToken ? config.proxyToken + '/' : '') + n.prefix; }
+function render(){
+  var q = (document.getElementById('q').value||'').toLowerCase();
+  var box = document.getElementById('nodes'); box.innerHTML = '';
+  var list = nodes.filter(function(n){ return !q || n.name.toLowerCase().indexOf(q)>=0 || n.prefix.toLowerCase().indexOf(q)>=0; });
+  document.getElementById('statLine').textContent = '共 ' + nodes.length + ' 个节点' + (readonly ? ' · 只读模式（未绑定 KV，节点来自 NODES_JSON）' : '');
+  if (!list.length) { box.innerHTML = '<div class="card mut">还没有节点。管理员点“+ 添加节点”，或订阅者点“申请节点”。</div>'; return; }
+  list.forEach(function(n){
+    var d = document.createElement('div'); d.className = 'card node';
+    var html = '<h3>' + esc(n.name) + '</h3>';
+    html += '<div class="mut">前缀：' + esc(n.prefix) + ' · 模式：' + esc(n.mode||'兼容') + '</div>';
+    if (n.remark) html += '<div class="mut">' + esc(n.remark) + '</div>';
+    if (n.target) html += '<div class="mono">源站：' + esc(n.target) + '</div>';
+    if (n.watchLimitDays) html += '<div class="mut">观看下限：' + n.watchLimitDays + ' 天</div>';
+    html += '<div class="mono" style="margin:8px 0">' + esc(directLink(n)) + '</div>';
+    html += '<div class="row">';
+    html += '<button data-a="copy">复制直达</button>';
+    html += '<button class="ghost" data-a="import">一键导入</button>';
+    if (role === 'admin') {
+      html += '<button class="ghost" data-a="edit">编辑</button>';
+      html += '<button class="ghost" data-a="ping">测速</button>';
+      html += '<button class="danger" data-a="del">删除</button>';
+    }
+    html += '</div><div class="mut" data-r="ping"></div>';
+    d.innerHTML = html;
+    d.querySelector('[data-a="copy"]').onclick = function(){ copyText(directLink(n)); };
+    d.querySelector('[data-a="import"]').onclick = function(){ openImport(n); };
+    if (role === 'admin') {
+      d.querySelector('[data-a="edit"]').onclick = function(){ openEdit(n); };
+      d.querySelector('[data-a="ping"]').onclick = async function(){
+        var el = d.querySelector('[data-r="ping"]'); el.textContent = '测速中…';
+        try { var r = await api('/api/nodes/'+encodeURIComponent(n.prefix)+'/ping','POST',{}); el.textContent = '上游状态 '+r.status+'，'+r.ms+'ms'; }
+        catch(e){ el.textContent = '测速失败：'+e.message; }
+      };
+      d.querySelector('[data-a="del"]').onclick = async function(){
+        if (!confirm('确定删除节点 '+n.prefix+'？')) return;
+        try { await api('/api/nodes/'+encodeURIComponent(n.prefix),'DELETE'); toast('已删除'); await load(); } catch(e){ toast(e.message); }
+      };
+    }
+    box.appendChild(d);
+  });
+}
+async function load(){
+  try {
+    var me = await api('/api/me'); role = me.role; readonly = me.readonly;
+    var r = await api('/api/nodes');
+    nodes = r.nodes; readonly = r.readonly;
+    if (role !== 'subscriber') { try { var c = await api('/api/config'); config = c.config||{}; } catch(e){} }
+    document.getElementById('loginCard').style.display='none';
+    document.getElementById('panel').style.display='block';
+    document.getElementById('topBtns').style.display='flex';
+    document.getElementById('roleTag').textContent = role === 'admin' ? '管理员' : (role === 'subadmin' ? '子管理员' : '订阅者（只读）');
+    document.getElementById('btnAdd').style.display = role === 'admin' ? '' : 'none';
+    document.getElementById('btnConfig').style.display = role === 'admin' ? '' : 'none';
+    if (readonly) { var b=document.getElementById('banner'); b.style.display='block'; b.textContent='只读模式：未绑定 KV，节点来自环境变量 NODES_JSON，面板里改不了节点。想在面板里增删改，请在 Pages 控制台绑定 KV（变量名 PROXYHUB_KV），见 README。'; }
+    if (role !== 'subscriber') { try { var rq = await api('/api/requests'); document.getElementById('reqCount').textContent = rq.requests.length ? '('+rq.requests.length+')' : ''; } catch(e){} }
+    render();
+  } catch(e){ toast(e.message); }
+}
+function openEdit(n){
+  editingPrefix = n ? n.prefix : '';
+  var f = document.getElementById('nodeForm');
+  document.getElementById('nodeDlgTitle').textContent = n ? '编辑节点' : '添加节点';
+  f.prefix.value = n ? n.prefix : ''; f.prefix.disabled = !!n;
+  f.name.value = n ? n.name : ''; f.target.value = n ? (n.target||'') : '';
+  f.targets.value = n ? (n.targets||[]).join(',') : '';
+  f.mode.value = n ? (n.mode||'兼容') : '兼容';
+  f.remark.value = n ? (n.remark||'') : ''; f.username.value = n ? (n.username||'') : '';
+  f.password.value = n ? (n.password||'') : ''; f.watchLimitDays.value = n ? (n.watchLimitDays||'') : '';
+  f.emosId.value = n ? (n.emosId||'') : ''; f.emosName.value = n ? (n.emosName||'') : '';
+  document.getElementById('nodeDlg').showModal();
+}
+function openImport(n){
+  document.getElementById('impNode').textContent = n.name + '（' + directLink(n) + '）';
+  document.getElementById('impUser').value = n.username || '';
+  document.getElementById('impPass').value = n.password || '';
+  function build(){
+    var u = encodeURIComponent(document.getElementById('impUser').value||'');
+    var p = encodeURIComponent(document.getElementById('impPass').value||'');
+    var host = location.host + '/' + (config.proxyToken ? config.proxyToken + '/' : '') + n.prefix;
+    var links = [
+      ['SenPlayer', 'senplayer://importserver?type=emby&name='+encodeURIComponent(n.name)+'&address='+encodeURIComponent(directLink(n))+'&username='+u+'&password='+p],
+      ['Rex', 'rex://import?type=emby&scheme=https&host='+encodeURIComponent(host)+'&port=443&username='+u+'&password='+p+'&title='+encodeURIComponent(n.name)],
+      ['Hills', 'hills://import?type=emby&scheme=https&host='+encodeURIComponent(host)+'&port=443&username='+u+'&password='+p+'&title='+encodeURIComponent(n.name)]
+    ];
+    document.getElementById('impLinks').innerHTML = links.map(function(x){
+      return '<div class="row" style="margin:6px 0"><span style="width:80px">'+x[0]+'</span><input value="'+esc(x[1])+'" readonly style="flex:1"><button class="ghost" data-l="'+esc(x[1])+'">复制</button></div>';
+    }).join('');
+    document.querySelectorAll('#impLinks [data-l]').forEach(function(b){ b.onclick = function(){ copyText(b.getAttribute('data-l')); }; });
+  }
+  document.getElementById('impUser').oninput = build; document.getElementById('impPass').oninput = build;
+  build(); document.getElementById('impDlg').showModal();
+}
+document.getElementById('btnLogin').onclick = async function(){
+  var pw = document.getElementById('pw').value;
+  try {
+    var r = await api('/api/login','POST',{password:pw});
+    token = r.token; localStorage.setItem('ph_token', token);
+    document.getElementById('loginMsg').textContent = '';
+    await load();
+  } catch(e){ document.getElementById('loginMsg').textContent = e.message; }
+};
+document.getElementById('pw').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('btnLogin').click(); });
+document.getElementById('btnLogout').onclick = function(){ token=''; localStorage.removeItem('ph_token'); location.reload(); };
+document.getElementById('btnAdd').onclick = function(){ openEdit(null); };
+document.getElementById('q').oninput = render;
+document.getElementById('nodeForm').addEventListener('submit', async function(e){
+  e.preventDefault(); var f = e.target;
+  var body = {prefix:f.prefix.value.trim(), name:f.name.value.trim(), target:f.target.value.trim(), targets:f.targets.value, mode:f.mode.value, remark:f.remark.value, username:f.username.value, password:f.password.value, watchLimitDays:f.watchLimitDays.value, emosId:f.emosId.value, emosName:f.emosName.value};
+  try {
+    if (editingPrefix) await api('/api/nodes/'+encodeURIComponent(editingPrefix),'PUT',body);
+    else await api('/api/nodes','POST',body);
+    document.getElementById('nodeDlg').close(); toast('已保存'); await load();
+  } catch(err){ toast(err.message); }
+});
+document.getElementById('nodeForm').mode.onchange = function(){ document.getElementById('emosBox').style.display = this.value === 'EMOS' ? '' : 'none'; };
+document.getElementById('btnConfig').onclick = async function(){
+  try { var c = await api('/api/config'); var f = document.getElementById('cfgForm');
+    f.webPassword.value=''; f.subAdminPassword.value=''; f.proxyToken.value = c.config.proxyToken||'';
+    f.allowBare.checked = c.config.allowBare !== false;
+    f.subscribers.value = (c.config.subscribers||[]).map(function(s){ return (s.name? s.name+':':'')+s.password; }).join('\n');
+    document.getElementById('cfgDlg').showModal();
+  } catch(e){ toast(e.message); }
+};
+document.getElementById('cfgForm').addEventListener('submit', async function(e){
+  e.preventDefault(); var f = e.target;
+  var subs = f.subscribers.value.split('\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(l){
+    var i = l.indexOf(':'); return i>=0 ? {name:l.slice(0,i), password:l.slice(i+1)} : {name:'', password:l};
+  });
+  var body = {allowBare:f.allowBare.checked, subscribers:subs};
+  if (f.webPassword.value) body.webPassword = f.webPassword.value;
+  if (f.subAdminPassword.value) body.subAdminPassword = f.subAdminPassword.value;
+  body.proxyToken = f.proxyToken.value.trim();
+  try { var r = await api('/api/config','POST',body); config = r.config; document.getElementById('cfgDlg').close(); toast('设置已保存'); await load(); } catch(err){ toast(err.message); }
+});
+document.getElementById('btnExport').onclick = async function(){
+  try { var r = await api('/api/export'); var blob = new Blob([JSON.stringify(r.data,null,2)],{type:'application/json'});
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'proxyhub-edgeone-backup.json'; a.click(); } catch(e){ toast(e.message); }
+};
+document.getElementById('btnImport').onclick = function(){ document.getElementById('importFile').click(); };
+document.getElementById('importFile').onchange = async function(){
+  var file = this.files[0]; if (!file) return;
+  try { var data = JSON.parse(await file.text()); await api('/api/import','POST',{data:data}); toast('导入成功'); document.getElementById('cfgDlg').close(); await load(); } catch(e){ toast(e.message); }
+};
+document.getElementById('btnRequests').onclick = async function(){
+  if (role === 'subscriber') { toast('订阅者不能查看申请列表'); return; }
+  try {
+    var r = await api('/api/requests');
+    document.getElementById('reqList').innerHTML = r.requests.length ? r.requests.map(function(x){
+      return '<div class="card"><b>'+esc(x.name)+'</b><div class="mono">'+esc(x.url)+'</div><div class="row"><button class="ghost" data-approve="'+x.id+'">同意（去添加）</button><button class="danger" data-reject="'+x.id+'">拒绝</button></div></div>';
+    }).join('') : '<p class="mut">暂无申请</p>';
+    document.getElementById('applyBox').style.display = 'none';
+    document.querySelectorAll('[data-approve]').forEach(function(b){ b.onclick = async function(){ try { var p = await api('/api/requests/'+b.getAttribute('data-approve')+'/approve','POST',{}); document.getElementById('reqDlg').close(); openEdit(null); var f=document.getElementById('nodeForm'); f.name.value=p.prefill.name; f.target.value=p.prefill.target; } catch(e){ toast(e.message); } }; });
+    document.querySelectorAll('[data-reject]').forEach(function(b){ b.onclick = async function(){ try { await api('/api/requests/'+b.getAttribute('data-reject'),'DELETE'); toast('已拒绝'); document.getElementById('reqDlg').close(); await load(); } catch(e){ toast(e.message); } }; });
+    document.getElementById('reqDlg').showModal();
+  } catch(e){ toast(e.message); }
+};
+document.getElementById('btnApply').onclick = function(){
+  document.getElementById('reqList').innerHTML = '';
+  document.getElementById('applyBox').style.display = '';
+  document.getElementById('reqDlg').showModal();
+};
+document.getElementById('btnSubmitApply').onclick = async function(){
+  try { await api('/api/requests','POST',{name:document.getElementById('applyName').value, url:document.getElementById('applyUrl').value}); toast('申请已提交，等待管理员审核'); document.getElementById('reqDlg').close(); } catch(e){ toast(e.message); }
+};
+if (token) load();
+</script>
+</body>
+</html>
