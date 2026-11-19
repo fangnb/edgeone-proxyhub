@@ -723,7 +723,7 @@ export async function onRequest(context) {
   // /api/health - no auth, tells the panel which storage mode it is in
   if (path === '/api/health' || path === '/api') {
     const { storage } = await loadData(context);
-    return json({ ok: true, version: 'edgeone-v1.0', storage, adminConfigured: Boolean(env.ADMIN_TOKEN) });
+    return json({ ok: true, version: 'edgeone-v1.0-t2', storage, adminConfigured: Boolean(env.ADMIN_TOKEN) });
   }
 
   // 临时测试：抖音翻页（EdgeOne 出口）——无需登录，测完删除
